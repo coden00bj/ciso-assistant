@@ -1,0 +1,129 @@
+# CISO Assistant on the Raspberry Pi, deployed by Coolify (Docker Compose build pack).
+# Public at https://ciso.coffeeandnoobcode.com: Cloudflare tunnel -> Coolify Traefik
+# (plain HTTP :80) -> caddy below -> backend/frontend. See deploy/pi/README.md.
+#
+# Derived from the upstream docker-compose.yml + config/templates/*-sqlite-traefik.yml.j2
+# at v4.1.2. Differences: pinned image tags, no container_name (Coolify renames),
+# no qdrant/mcp, a named volume instead of ./db, DEBUG off, a fixed frontend ORIGIN,
+# and caddy as a plain-HTTP path router that trusts the upstream X-Forwarded-Proto.
+
+x-backend-env: &backend-env
+  ALLOWED_HOSTS: backend,localhost,ciso.coffeeandnoobcode.com
+  CISO_ASSISTANT_URL: https://ciso.coffeeandnoobcode.com
+  DJANGO_DEBUG: "False"
+  # Set in Coolify. huey skips startup.sh (which would otherwise persist a key in
+  # db/django_secret_key), so the key must come from the environment for both.
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+  AUTH_TOKEN_TTL: "7200"
+  GUNICORN_WORKERS: "2"
+  HOME: /tmp
+  XDG_CACHE_HOME: /tmp/.cache
+  XDG_CONFIG_HOME: /tmp/.config
+  XDG_DATA_HOME: /tmp/.local/share
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev
+
+services:
+  # /code/db is excluded from the image (.dockerignore), so a fresh named volume is
+  # root-owned and the uid-1001 backend could not write to it. Upstream's install
+  # script chowns ./db on the host instead.
+  db-init:
+    image: busybox:1.37
+    command: ["chown", "-R", "1001:1001", "/code/db"]
+    volumes:
+      - ciso-db:/code/db
+    restart: "no"
+    exclude_from_hc: true
+
+  backend:
+    image: ghcr.io/intuitem/ciso-assistant-community/backend:v4.1.2
+    restart: always
+    environment: *backend-env
+    <<: *hardening
+    user: "1001:1001"
+    volumes:
+      - ciso-db:/code/db
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 150s
+
+  huey:
+    image: ghcr.io/intuitem/ciso-assistant-community/backend:v4.1.2
+    restart: always
+    environment: *backend-env
+    <<: *hardening
+    user: "1001:1001"
+    volumes:
+      - ciso-db:/code/db
+    entrypoint:
+      - /bin/sh
+      - -c
+      - python manage.py run_huey -w 1 --scheduler-interval 60
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 768m
+
+  frontend:
+    image: ghcr.io/intuitem/ciso-assistant-community/frontend:v4.1.2
+    restart: always
+    environment:
+      PUBLIC_BACKEND_API_URL: http://backend:8000/api
+      PUBLIC_BACKEND_API_EXPOSED_URL: https://ciso.coffeeandnoobcode.com/api
+      # Fixed origin rather than PROTOCOL_HEADER/HOST_HEADER: two proxies sit in front.
+      ORIGIN: https://ciso.coffeeandnoobcode.com
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_DATA_HOME: /tmp/.local/share
+    <<: *hardening
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 384m
+
+  # Coolify's domain is attached to this service (port 80). TLS ends at Cloudflare.
+  # trusted_proxies matters: without it caddy replaces X-Forwarded-Proto=https with
+  # http, Django (SECURE_PROXY_SSL_HEADER) sees an insecure request and CSRF fails.
+  caddy:
+    image: caddy:2.11.4
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        cat > /etc/caddy/Caddyfile <<'EOF'
+        {
+          auto_https off
+          admin off
+          servers {
+            trusted_proxies static private_ranges
+          }
+        }
+        :80 {
+          reverse_proxy /api/* backend:8000
+          reverse_proxy /* frontend:3000
+        }
+        EOF
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  ciso-db:
