@@ -53,13 +53,14 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
-    mem_limit: 1g
+    mem_limit: 1536m
+    # First boot on the Pi runs ~600 migrations + storelibraries: well over 10 min.
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/', timeout=5)"]
       interval: 10s
       timeout: 10s
-      retries: 30
-      start_period: 150s
+      retries: 60
+      start_period: 900s
 
   huey:
     image: ghcr.io/intuitem/ciso-assistant-community/backend:v4.1.2
