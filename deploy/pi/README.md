@@ -25,6 +25,8 @@ Cloudflare (TLS) ─tunnel─▶ Coolify Traefik :80 ─▶ caddy :80 ─┬─ 
   stored under `/mnt/ssd/docker/volumes/`).
 - **Dropped from upstream:** qdrant (only used by the AI chat, `ENABLE_CHAT` is off)
   and the MCP server (opt-in upstream; add it later if wanted).
+- **Measured on the Pi (v4.1.2, idle):** backend ~730 MiB, huey ~285 MiB, frontend ~260 MiB,
+  caddy ~20 MiB. First boot took ~12 min (≈600 migrations + `storelibraries`); later boots take ~1 min.
 - Upstream's hardening is kept: read-only rootfs, `cap_drop: ALL`,
   no-new-privileges, uid 1001.
 
@@ -74,7 +76,10 @@ Then turn on MFA for that account in the UI (Profile → MFA). The site is publi
 
 `deploy/pi/backup.sh` streams a `.tar.gz` (an online sqlite backup + attachments)
 out of the running backend into `/mnt/ssd/backups/ciso-assistant/`, keeping 14
-days. Cron (wern) runs it at 03:30 nightly.
+days. Cron (wern) runs it at 03:30 nightly. `/mnt/ssd` is root-owned, so the
+directory had to be created once with
+`sudo install -d -o wern -g wern /mnt/ssd/backups/ciso-assistant`.
+First real backup: ~22 MB compressed (a 174 MB sqlite file, mostly the bundled framework libraries).
 
 Restore: stop the app in Coolify, then extract the archive into the volume and fix
 ownership:

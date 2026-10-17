@@ -95,7 +95,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    mem_limit: 384m
+    mem_limit: 512m
 
   # Coolify's domain is attached to this service (port 80). TLS ends at Cloudflare.
   # trusted_proxies matters: without it caddy replaces X-Forwarded-Proto=https with
