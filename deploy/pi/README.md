@@ -25,7 +25,7 @@ Cloudflare (TLS) ─tunnel─▶ Coolify Traefik :80 ─▶ caddy :80 ─┬─ 
   stored under `/mnt/ssd/docker/volumes/`).
 - **Dropped from upstream:** qdrant (only used by the AI chat, `ENABLE_CHAT` is off)
   and the MCP server (opt-in upstream; add it later if wanted).
-- **Measured on the Pi (v4.1.2, idle):** backend ~730 MiB, huey ~285 MiB, frontend ~260 MiB,
+- **Measured on the Pi (v4.1.2, idle):** backend ~730 MiB, huey ~285 MiB, frontend ~260 MiB at start but ~450 MiB after real use (hence the 768m cap),
   caddy ~20 MiB. First boot took ~12 min (≈600 migrations + `storelibraries`); later boots take ~1 min.
 - Upstream's hardening is kept: read-only rootfs, `cap_drop: ALL`,
   no-new-privileges, uid 1001.
